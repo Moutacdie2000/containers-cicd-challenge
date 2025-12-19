@@ -1,67 +1,25 @@
 import pytest
+import sys
+from pathlib import Path
+
+# Ajouter le répertoire parent au path pour les imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Ces imports doivent venir après le conftest setup
+from main import app, User, verify_token
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from app.main import app, Base, get_db, User, verify_token
 
-# Base de données de test en mémoire
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-Base.metadata.create_all(bind=engine)
-
-def override_get_db():
-    try:
-        db = TestingSessionLocal()
-        yield db
-    finally:
-        db.close()
-
-def override_verify_token(authorization: str = None):
-    """Override pour les tests - parse le token manuellement"""
-    db = TestingSessionLocal()
-    try:
-        if not authorization:
-            from fastapi import HTTPException, status
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Authorization header missing",
-            )
-        
-        parts = authorization.split()
-        if len(parts) != 2 or parts[0].lower() != "bearer":
-            from fastapi import HTTPException, status
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authorization header format",
-            )
-        
-        token = parts[1]
-        user = db.query(User).filter(User.token == token).first()
-        if not user:
-            from fastapi import HTTPException, status
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        return user
-    finally:
-        db.close()
-
-app.dependency_overrides[get_db] = override_get_db
-app.dependency_overrides[verify_token] = override_verify_token
-
-client = TestClient(app)
+# client est importé depuis le conftest qui l'a déjà configuré
+# On le récupère depuis les fixtures
+@pytest.fixture
+def client():
+    from fastapi.testclient import TestClient
+    return TestClient(app)
 
 class TestSignup:
     """Tests pour l'endpoint /signup"""
     
-    def test_signup_success(self):
+    def test_signup_success(self, client):
         """Test 1: Création d'un compte utilisateur avec succès"""
         response = client.post(
             "/signup",
@@ -73,7 +31,7 @@ class TestSignup:
         assert "token" in data
         assert "id" in data
     
-    def test_signup_duplicate_email(self):
+    def test_signup_duplicate_email(self, client):
         """Test 2: Impossible de créer deux comptes avec le même email"""
         # Créer le premier compte
         client.post(
@@ -91,7 +49,7 @@ class TestSignup:
 class TestLogin:
     """Tests pour l'endpoint /login"""
     
-    def test_login_success(self):
+    def test_login_success(self, client):
         """Test 3: Connexion réussie avec les bonnes identifiants"""
         # D'abord créer un compte
         client.post(
@@ -109,7 +67,7 @@ class TestLogin:
         assert data["email"] == "login@example.com"
         assert "token" in data
     
-    def test_login_invalid_password(self):
+    def test_login_invalid_password(self, client):
         """Test 4: Impossible de se connecter avec un mauvais mot de passe"""
         # Créer un compte
         client.post(
@@ -128,7 +86,7 @@ class TestLogin:
 class TestProtectedRoute:
     """Tests pour les routes protégées"""
     
-    def test_protected_route_with_valid_token(self):
+    def test_protected_route_with_valid_token(self, client):
         """Test 5: Accès à une route protégée avec un token valide"""
         # Créer un compte et obtenir un token
         signup_response = client.post(
@@ -145,7 +103,7 @@ class TestProtectedRoute:
         assert response.status_code == 200
         assert "Hello protected@example.com!" in response.json()["message"]
     
-    def test_protected_route_without_token(self):
+    def test_protected_route_without_token(self, client):
         """Test 6: Impossible d'accéder à une route protégée sans token"""
         response = client.get("/protected")
         assert response.status_code == 403
@@ -153,7 +111,7 @@ class TestProtectedRoute:
 class TestHealthCheck:
     """Tests pour l'endpoint de health check"""
     
-    def test_health_check(self):
+    def test_health_check(self, client):
         """Test 7: Le health check retourne le statut ok"""
         response = client.get("/health")
         assert response.status_code == 200

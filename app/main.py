@@ -15,7 +15,11 @@ DATABASE_URL = os.getenv(
     "postgresql://postgres:postgres@localhost:5432/fastapi_db"
 )
 
-engine = create_engine(DATABASE_URL)
+# Pour SQLite en-mémoire, il faut check_same_thread=False
+if "sqlite" in DATABASE_URL:
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -31,8 +35,9 @@ class User(Base):
     hashed_password = Column(String)
     token = Column(String, nullable=True, unique=True, index=True)
 
-# Créer les tables
-Base.metadata.create_all(bind=engine)
+# NOTE: Ne pas appeler Base.metadata.create_all() ici car il peut être
+# appelé avant que le conftest.py ait la chance de reconfigurer l'engine
+# Les tables seront créées lors du démarrage de l'app ou dans les tests
 
 # Modèles Pydantic
 class UserSignup(BaseModel):
@@ -58,6 +63,11 @@ def get_db():
         yield db
     finally:
         db.close()
+
+# Fonction pour créer les tables
+def init_db():
+    """Créer les tables de la base de données"""
+    Base.metadata.create_all(bind=engine)
 
 # Fonctions utilitaires
 def hash_password(password: str) -> str:
@@ -96,6 +106,11 @@ def verify_token(authorization: Optional[str] = Header(None), db: Session = Depe
 
 # Application FastAPI
 app = FastAPI(title="FastAPI Auth API", version="1.0.0")
+
+@app.on_event("startup")
+def startup_event():
+    """Initialiser les tables au démarrage"""
+    init_db()
 
 @app.post("/signup", response_model=UserResponse)
 def signup(user: UserSignup, db: Session = Depends(get_db)):
