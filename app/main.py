@@ -4,6 +4,7 @@ from sqlalchemy import create_engine, Column, String, Integer
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from fastapi import FastAPI, Depends, HTTPException, status, Header
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 from passlib.context import CryptContext
 import secrets
@@ -106,6 +107,15 @@ def verify_token(authorization: Optional[str] = Header(None), db: Session = Depe
 
 # Application FastAPI
 app = FastAPI(title="FastAPI Auth API", version="1.0.0")
+
+# Configuration CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Permettre toutes les origines
+    allow_credentials=True,
+    allow_methods=["*"],  # Permettre tous les méthodes (GET, POST, etc.)
+    allow_headers=["*"],  # Permettre tous les headers
+)
 
 @app.on_event("startup")
 def startup_event():
